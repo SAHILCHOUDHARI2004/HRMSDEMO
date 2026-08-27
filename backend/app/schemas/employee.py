@@ -1,0 +1,88 @@
+from pydantic import BaseModel, EmailStr, field_serializer, ConfigDict
+from typing import Optional, List
+from datetime import date, datetime
+
+from app.utils.employee_code import normalize_employee_code
+
+from app.schemas.master_data import ShiftResponse
+
+class EmployeeBase(BaseModel):
+    first_name: str
+    last_name: str
+    gender: Optional[str] = None
+    dob: Optional[date] = None
+    marital_status: Optional[str] = None
+    blood_group: Optional[str] = None
+    department: Optional[str] = None
+    designation: Optional[str] = None
+    employee_type: Optional[str] = None
+    work_location: Optional[str] = None
+    shift_type: Optional[str] = None
+    shift_id: Optional[int] = None
+    doj: Optional[date] = None
+    official_email: EmailStr
+    personal_email: Optional[EmailStr] = None
+    mobile: str
+    alternate_mobile: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_number: Optional[str] = None
+    status: str = "Active"
+
+class EmployeeCreate(EmployeeBase):
+    reporting_manager_id: Optional[int] = None
+
+class EmployeeUpdate(BaseModel):
+    reporting_manager_id: Optional[int] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    gender: Optional[str] = None
+    dob: Optional[date] = None
+    marital_status: Optional[str] = None
+    blood_group: Optional[str] = None
+    department: Optional[str] = None
+    designation: Optional[str] = None
+    employee_type: Optional[str] = None
+    work_location: Optional[str] = None
+    shift_type: Optional[str] = None
+    shift_id: Optional[int] = None
+    doj: Optional[date] = None
+    official_email: Optional[EmailStr] = None
+    personal_email: Optional[EmailStr] = None
+    mobile: Optional[str] = None
+    alternate_mobile: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_number: Optional[str] = None
+    status: Optional[str] = None
+
+class EmployeeResponse(EmployeeBase):
+    id: int
+    user_id: int
+    employee_code: str
+    reporting_manager_id: Optional[int] = None
+    reporting_manager_name: Optional[str] = None
+    shift: Optional[ShiftResponse] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    @field_serializer("employee_code")
+    def _serialize_employee_code(self, value: str) -> str:
+        return normalize_employee_code(value)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class EmployeeListResponse(BaseModel):
+    data: List[EmployeeResponse]
+    total: int
+
+
+class EmployeeCredentialsResponse(BaseModel):
+    employee_id: int
+    employee_code: str
+    employee_name: str
+    username: str
+    email: EmailStr
+    activation_required: bool = True
+    temporary_password_hint: str = "The employee must set a password using the activation email."
+    status: str
+        

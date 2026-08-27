@@ -1,0 +1,49 @@
+# Core Framework & Server
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+starlette>=0.38.0
+anyio>=4.0.0
+h11>=0.14.0
+httpx>=0.27.0
+websockets>=13.0.0
+
+# Database & ORM
+SQLAlchemy>=2.0.30
+alembic>=1.13.0
+psycopg>=3.1.0
+psycopg-binary>=3.1.0
+PyMySQL>=1.1.0
+greenlet>=3.0.0
+
+# Data Validation & Settings
+pydantic>=2.10.0
+pydantic-settings>=2.7.0
+pydantic-core>=2.27.0
+annotated-types>=0.7.0
+email-validator>=2.1.0
+typing-extensions>=4.12.0
+typing-inspection>=0.4.0
+
+# Authentication, Security & Cryptography
+passlib[bcrypt]>=1.7.4
+# passlib 1.7.4 is not compatible with bcrypt 5.x. Keep the existing bcrypt
+# hash format while avoiding the runtime self-test failure in clean installs.
+bcrypt==4.0.1
+PyJWT>=2.8.0
+
+# System, Configuration & Scheduling
+python-dotenv>=1.0.0
+python-multipart>=0.0.9
+APScheduler>=3.10.0
+tzdata>=2024.1
+click>=8.1.0
+colorama>=0.4.6
+six>=1.16.0
+
+# Reports, Documents & PDF Generation
+reportlab>=4.0.0
+Mako>=1.3.0
+MarkupSafe>=2.1.0
+
+# Testing & Quality Assurance
+pytest>=8.0.0

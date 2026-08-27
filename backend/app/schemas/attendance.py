@@ -1,0 +1,353 @@
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, computed_field
+from datetime import date, time, datetime
+from typing import Optional, List
+from app.core.enums import WorkMode
+
+
+class PunchRequest(BaseModel):
+    """Request model for punch in/out operations with optional location/image data."""
+    model_config = ConfigDict(populate_by_name=True)
+
+    employee_id: Optional[int] = Field(
+        default=None,
+        alias="employeeId",
+        validation_alias=AliasChoices("employeeId", "employee_id"),
+    )
+    work_mode: WorkMode = Field(default=WorkMode.office, alias="workMode")
+    latitude: Optional[float] = Field(default=None, description="Optional check-in/out latitude")
+    longitude: Optional[float] = Field(default=None, description="Optional check-in/out longitude")
+    address: Optional[str] = Field(default=None, description="Optional check-in/out address")
+    image: Optional[str] = Field(default=None, description="Optional base64 encoded webcam snapshot")
+    custom_time: Optional[datetime] = Field(
+        default=None,
+        alias="customTime",
+        validation_alias=AliasChoices(
+            "customTime",
+            "punchInTime",
+            "punchOutTime",
+            "punch_in_time",
+            "punch_out_time",
+        ),
+    )
+
+    @field_validator("image")
+    @classmethod
+    def validate_image(cls, value: Optional[str]) -> Optional[str]:
+        """Validate image size - max 5MB for base64."""
+        if value and len(value) > 5_000_000:
+            raise ValueError("Image too large (max 5MB)")
+        return value
+
+    @field_validator("work_mode", mode="before")
+    @classmethod
+    def validate_work_mode(cls, value):
+        """Convert string work mode to enum."""
+        if isinstance(value, str):
+            try:
+                return WorkMode(value)
+            except ValueError:
+                raise ValueError(f"Invalid work mode. Must be one of: {', '.join([m.value for m in WorkMode])}")
+        return value
+
+class ScheduleRequest(BaseModel):
+    """Request model for scheduling shifts."""
+    model_config = ConfigDict(populate_by_name=True)
+
+    date: date
+    start_time: Optional[time] = Field(default=None, alias="startTime")
+    end_time: Optional[time] = Field(default=None, alias="endTime")
+    work_mode: WorkMode = Field(default=WorkMode.office, alias="workMode")
+    task_description: Optional[str] = Field(default=None, alias="taskDescription")
+
+    @field_validator("work_mode", mode="before")
+    @classmethod
+    def validate_work_mode(cls, value):
+        """Convert string work mode to enum."""
+        if isinstance(value, str):
+            try:
+                return WorkMode(value)
+            except ValueError:
+                raise ValueError(f"Invalid work mode. Must be one of: {', '.join([m.value for m in WorkMode])}")
+        return value
+
+class AttendanceResponse(BaseModel):
+    """Complete attendance record response with all calculated metrics."""
+    model_config = ConfigDict(
+        from_attributes=True,
+        populate_by_name=True,
+    )
+
+    id: int
+    employee_id: int = Field(alias="employeeId")
+    shift_id: Optional[int] = Field(default=None, alias="shiftId")
+    employee: Optional[str] = Field(default=None)
+    shift: Optional[dict] = Field(default=None)
+    date: date
+    scheduled_start: Optional[time] = Field(default=None, alias="scheduledStart")
+    scheduled_end: Optional[time] = Field(default=None, alias="scheduledEnd")
+    task_description: Optional[str] = Field(default=None, alias="taskDescription")
+    punch_in: Optional[time] = Field(default=None, alias="punchIn")
+    punch_out: Optional[time] = Field(default=None, alias="punchOut")
+    status: str
+    work_mode: WorkMode = Field(alias="workMode")
+    
+    # Location fields - optional
+    work_location_id: Optional[int] = Field(default=None, alias="workLocationId")
+    work_location_name: Optional[str] = Field(default=None, alias="workLocationName")
+    geofence_distance_meters: Optional[float] = Field(default=None, alias="geofenceDistanceMeters")
+    punch_in_latitude: Optional[float] = Field(default=None, alias="punchInLatitude")
+    punch_in_longitude: Optional[float] = Field(default=None, alias="punchInLongitude")
+    punch_in_address: Optional[str] = Field(default=None, alias="punchInAddress")
+    punch_out_latitude: Optional[float] = Field(default=None, alias="punchOutLatitude")
+    punch_out_longitude: Optional[float] = Field(default=None, alias="punchOutLongitude")
+    punch_out_address: Optional[str] = Field(default=None, alias="punchOutAddress")
+    
+    # Image fields - optional
+    punch_in_image: Optional[str] = Field(default=None, alias="punchInImage")
+    punch_out_image: Optional[str] = Field(default=None, alias="punchOutImage")
+    
+    # Calculated metrics
+    total_working_minutes: int = Field(default=0, alias="totalWorkingMinutes")
+    overtime_minutes: int = Field(default=0, alias="overtimeMinutes")
+    break_minutes: int = Field(default=0, alias="breakMinutes")
+    grand_total_minutes: int = Field(default=0, alias="grandTotalMinutes")
+    late_minutes: int = Field(default=0, alias="lateMinutes")
+    early_exit_minutes: int = Field(default=0, alias="earlyExitMinutes")
+
+    # Enterprise checkout & overtime fields
+    flags: List[str] = Field(default=[], alias="flags")
+    checkout_source: str = Field(default="MANUAL", alias="checkoutSource")
+    requires_regularization: bool = Field(default=False, alias="requiresRegularization")
+    overtime_approved: bool = Field(default=False, alias="overtimeApproved")
+    overtime_start: Optional[time] = Field(default=None, alias="overtimeStart")
+    overtime_end: Optional[time] = Field(default=None, alias="overtimeEnd")
+
+    @field_validator("requires_regularization", mode="before")
+    @classmethod
+    def coerce_requires_regularization(cls, v):
+        return False if v is None else v
+
+    @field_validator("overtime_approved", mode="before")
+    @classmethod
+    def coerce_overtime_approved(cls, v):
+        return False if v is None else v
+
+    @field_validator("checkout_source", mode="before")
+    @classmethod
+    def coerce_checkout_source(cls, v):
+        return "MANUAL" if v is None else v
+
+    @computed_field(alias="isWorking")
+    @property
+    def is_working(self) -> bool:
+        return self.status.lower() == "working"
+
+    @computed_field(alias="attendanceStatus")
+    @property
+    def attendance_status(self) -> str:
+        return self.status.lower()
+
+    @computed_field(alias="badgeColor")
+    @property
+    def badge_color(self) -> str:
+        return "green" if self.status.lower() == "working" else "gray"
+
+class TodayAttendanceState(BaseModel):
+    """Current attendance state for today with working metrics and shift information."""
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+
+    employee_id: Optional[int] = Field(default=None, alias="employeeId")
+    is_working: bool = Field(alias="isWorking")
+    status: str
+    total_worked_seconds: int = Field(alias="totalWorkedSeconds")
+    approved_seconds: int = Field(alias="approvedSeconds")
+    remaining_seconds: int = Field(alias="remainingSeconds")
+    shift_total_seconds: int = Field(alias="shiftTotalSeconds")
+    shift_elapsed_seconds: int = Field(alias="shiftElapsedSeconds")
+    shift_start: str = Field(alias="shiftStart")
+    shift_end: str = Field(alias="shiftEnd")
+    shift_name: Optional[str] = Field(default=None, alias="shiftName")
+    shift_code: Optional[str] = Field(default=None, alias="shiftCode")
+    lunch_start: Optional[str] = Field(default=None, alias="lunchStart")
+    lunch_end: Optional[str] = Field(default=None, alias="lunchEnd")
+    grace_minutes: Optional[int] = Field(default=None, alias="graceMinutes")
+    lunch_duration_minutes: Optional[int] = Field(default=None, alias="lunchDurationMinutes")
+    work_mode: WorkMode = Field(default=WorkMode.office, alias="workMode")
+    
+    # Optional punch times and location
+    work_location_id: Optional[int] = Field(default=None, alias="workLocationId")
+    work_location_name: Optional[str] = Field(default=None, alias="workLocationName")
+    geofence_distance_meters: Optional[float] = Field(default=None, alias="geofenceDistanceMeters")
+    punch_in: Optional[time] = Field(default=None, alias="punchIn")
+    punch_out: Optional[time] = Field(default=None, alias="punchOut")
+    punch_in_latitude: Optional[float] = Field(default=None, alias="punchInLatitude")
+    punch_in_longitude: Optional[float] = Field(default=None, alias="punchInLongitude")
+    punch_in_address: Optional[str] = Field(default=None, alias="punchInAddress")
+    punch_out_latitude: Optional[float] = Field(default=None, alias="punchOutLatitude")
+    punch_out_longitude: Optional[float] = Field(default=None, alias="punchOutLongitude")
+    punch_out_address: Optional[str] = Field(default=None, alias="punchOutAddress")
+    
+    # Optional images
+    punch_in_image: Optional[str] = Field(default=None, alias="punchInImage")
+    punch_out_image: Optional[str] = Field(default=None, alias="punchOutImage")
+
+    # Enterprise checkout & overtime fields
+    yesterday_auto_checked_out: bool = Field(default=False, alias="yesterdayAutoCheckedOut")
+    flags: List[str] = Field(default=[], alias="flags")
+    requires_regularization: bool = Field(default=False, alias="requiresRegularization")
+    overtime_approved: bool = Field(default=False, alias="overtimeApproved")
+    overtime_extended: bool = Field(default=False, alias="overtimeExtended")
+    max_overtime_minutes: Optional[int] = Field(default=120, alias="maxOvertimeMinutes")
+    overtime_allowed: bool = Field(default=True, alias="overtimeAllowed")
+    overtime_start_time: Optional[str] = Field(default=None, alias="overtimeStartTime")
+
+    @field_validator("requires_regularization", mode="before")
+    @classmethod
+    def coerce_requires_regularization(cls, v):
+        return False if v is None else v
+
+    @field_validator("overtime_approved", mode="before")
+    @classmethod
+    def coerce_overtime_approved(cls, v):
+        return False if v is None else v
+
+    @field_validator("overtime_extended", mode="before")
+    @classmethod
+    def coerce_overtime_extended(cls, v):
+        return False if v is None else v
+
+    @computed_field(alias="attendanceStatus")
+    @property
+    def attendance_status(self) -> str:
+        return self.status.lower()
+
+    @computed_field(alias="badgeColor")
+    @property
+    def badge_color(self) -> str:
+        status_lower = self.status.lower()
+        if status_lower == "overtime working":
+            return "amber"
+        return "green" if status_lower == "working" else "gray"
+
+class AttendanceRecord(BaseModel):
+    """Attendance record for list responses."""
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: int
+    employee_name: str = Field(alias="employeeName")
+    employee_code: str = Field(alias="employeeCode")
+    department: str
+    date: date
+    scheduled_start: Optional[time] = Field(default=None, alias="scheduledStart")
+    scheduled_end: Optional[time] = Field(default=None, alias="scheduledEnd")
+    task_description: Optional[str] = Field(default=None, alias="taskDescription")
+    punch_in: Optional[time] = Field(default=None, alias="punchIn")
+    punch_out: Optional[time] = Field(default=None, alias="punchOut")
+    status: str
+    total_working_minutes: int = Field(default=0, alias="totalWorkingMinutes")
+    overtime_minutes: int = Field(default=0, alias="overtimeMinutes")
+    break_minutes: int = Field(default=0, alias="breakMinutes")
+    grand_total_minutes: int = Field(default=0, alias="grandTotalMinutes")
+    late_minutes: int = Field(default=0, alias="lateMinutes")
+    early_exit_minutes: int = Field(default=0, alias="earlyExitMinutes")
+    work_mode: Optional[WorkMode] = Field(None, alias="workMode")
+    work_location_id: Optional[int] = Field(default=None, alias="workLocationId")
+    work_location_name: Optional[str] = Field(default=None, alias="workLocationName")
+    geofence_distance_meters: Optional[float] = Field(default=None, alias="geofenceDistanceMeters")
+    punch_in_address: Optional[str] = Field(default=None, alias="punchInAddress")
+    punch_out_address: Optional[str] = Field(default=None, alias="punchOutAddress")
+    punch_in_image: Optional[str] = Field(default=None, alias="punchInImage")
+    punch_out_image: Optional[str] = Field(default=None, alias="punchOutImage")
+
+    # Enterprise checkout & overtime fields
+    flags: List[str] = Field(default=[], alias="flags")
+    checkout_source: Optional[str] = Field(default="MANUAL", alias="checkoutSource")
+    requires_regularization: bool = Field(default=False, alias="requiresRegularization")
+    overtime_approved: bool = Field(default=False, alias="overtimeApproved")
+
+    @field_validator("requires_regularization", mode="before")
+    @classmethod
+    def coerce_requires_regularization(cls, v):
+        return False if v is None else v
+
+    @field_validator("overtime_approved", mode="before")
+    @classmethod
+    def coerce_overtime_approved(cls, v):
+        return False if v is None else v
+
+    @field_validator("checkout_source", mode="before")
+    @classmethod
+    def coerce_checkout_source(cls, v):
+        return "MANUAL" if v is None else v
+
+    @computed_field(alias="isWorking")
+    @property
+    def is_working(self) -> bool:
+        return self.status.lower() == "working"
+
+    @computed_field(alias="attendanceStatus")
+    @property
+    def attendance_status(self) -> str:
+        return self.status.lower()
+
+    @computed_field(alias="badgeColor")
+    @property
+    def badge_color(self) -> str:
+        return "green" if self.status.lower() == "working" else "gray"
+
+
+class AttendanceMetrics(BaseModel):
+    present: int
+    working: int
+    absent: int
+    not_marked: int = Field(alias="notMarked")
+
+
+class AttendanceListResponse(BaseModel):
+    """List response for all attendance records."""
+    data: List[AttendanceRecord]
+    total: int
+    metrics: AttendanceMetrics
+
+class TodayAnalytics(BaseModel):
+    punch_in: Optional[str] = Field(default=None, alias="punchIn")
+    punch_out: Optional[str] = Field(default=None, alias="punchOut")
+    status: str
+    working_hours: str = Field(alias="workingHours")
+
+class MonthlyAnalytics(BaseModel):
+    present_days: int = Field(alias="presentDays")
+    absent_days: int = Field(alias="absentDays")
+    half_days: int = Field(alias="halfDays")
+    late_count: int = Field(alias="lateCount")
+    total_working_hours: str = Field(alias="totalWorkingHours")
+    total_overtime: str = Field(alias="totalOvertime")
+    attendance_percentage: float = Field(alias="attendancePercentage")
+
+class EmployeeAnalytics(BaseModel):
+    employee_id: int = Field(alias="employeeId")
+    employee_name: str = Field(alias="employeeName")
+    employee_code: str = Field(alias="employeeCode")
+    department: str
+    today: TodayAnalytics
+    monthly: MonthlyAnalytics
+
+
+class EmployeeLocationResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    employee_id: int = Field(alias="employeeId")
+    employee_name: str = Field(alias="employeeName")
+    designation: Optional[str] = Field(default="Team Member", alias="designation")
+    department: Optional[str] = Field(default="", alias="department")
+    latitude: float
+    longitude: float
+    city: str
+    state: str
+    punch_in_time: Optional[str] = Field(default=None, alias="punchInTime")
+    punch_out_time: Optional[str] = Field(default=None, alias="punchOutTime")
+    work_mode: str = Field(alias="workMode")  # 'FIELD', 'OFFICE', 'REMOTE'
+    status: str  # 'ACTIVE', 'WORKING', 'PUNCHED_OUT', 'LATE', 'ON_LEAVE', 'ABSENT'
+
